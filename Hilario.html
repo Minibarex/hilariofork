@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<!-- saved from url=(0021)http://trondal.com/h/ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <style>
+      canvas {
+        padding: 0;
+        margin: auto;
+        display: block;
+        position: absolute;
+        background: red;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
+      }
+      body {
+        background: black;
+      }
+    </style>
+    <title>Hilario</title>
+    <!-- v 0.2 nå med lyd -->
+    <!-- v 0.3 litt bedre kodestruktur, navn på variabler og kommentarer -->
+    <!-- v 0.4 litt bedre kodestruktur, litt raskere bevegelser, annerledes oppløsning, annerledes tastaturhåndtering -->
+    <!-- v 0.5 nå, endelig med scrolling! -->
+    <!-- v 0.6 har forsøkt å få til såkalt a posteriori kollisjonsdeteksjon i flere dager nå, men det blir ikke nøyaktig
+               slik jeg ønsker at det skal funke. for mange glitches. skal lage alt på nytt med et a priori system.
+               https://en.wikipedia.org/wiki/Collision_detection    -->
+  </head>
+  <body>
+    <canvas id="canvas" width="912" height="624" style="width: 912px; height: 624px;"></canvas>
+    <script>
+      const U = 16;  // Hovedenhet for antall piksler i bredden og høyden på grafikkelementer
+                     // Denne enheten MÅ være et partall for at koden skal fungere helt riktig.
+
+      /* Mesteparten av grafikken er bygget opp av kvadrater på 16*16 piksler.
+         Men bare i tilfellet man ville ønske å lage et annet spill med en
+         annen hovedenhet, defineres denne størrelsen kun 1 gang, nemlig her,
+         og refereres til flittig i resten av koden. */
+
+      const X = 19;  // Antall ganger i x-retning vi har U piksler med synlig grafikk.
+      const Y = 13;  // Antall ganger i x-retning vi har U piksler med synlig grafikk.
+
+      const W = X*U; // Antall piksler i x-retning med synlig grafikk (før skalering)
+      const H = Y*U; // Antall piksler i y-retning med synlig grafikk (før skalering)
+
+      var canvas = document.getElementById("canvas");
+      var ctx = canvas.getContext("2d");
+      skalerSpill();
+
+      function skalerSpill() {
+        var wn = Math.floor(window.innerWidth/W);   // Antall hele ganger vi klarer å øke bredden på spillet
+        var hn = Math.floor(window.innerHeight/H);  // Antall hele ganger vi klarer å øke høyden på spillet
+        var k = Math.min(wn,hn);                    // Den minste av disse verdiene
+        canvas.setAttribute("width", (k*W).toString());
+        canvas.setAttribute("height", (k*H).toString());
+        canvas.style.width=k*W+'px';                // Skalerer bredden
+        canvas.style.height=k*H+'px';               // Skalerer høyden
+        ctx.scale(k,k);
+        // Eksperimentell teknologi for å få skalering av pikselgrafikk til å se penere ut
+        // https://developer.mozilla.org/en/docs/Web/API/CanvasRenderingContext2D/imageSmoothingEnabled
+        ctx.mozImageSmoothingEnabled = false;
+        ctx.webkitImageSmoothingEnabled = false;
+        ctx.msImageSmoothingEnabled = false;
+        ctx.imageSmoothingEnabled = false;
+       }
+
+      window.onresize = function(event) {
+        skalerSpill();
+      };
+
+
+
+      /* ctx-objektet brukes for å tegne i canvas, som har koordinater på denne måten:
+         (0,0)············(X*U,0)
+         ·                      ·
+         ·                      ·
+         ·                      ·    Dvs, positive x-koordinater går mot høyre (som i vanlig matematikk)
+         ·                      ·    Men, positive y-koordinater går nedover (motsatt av vanlig matematikk)
+         ·                      ·
+         (0,Y*U)········(X*U,Y*U)    */
+
+
+      /*
+        Her er kartet til spillet definert som en 2-dimensjonell array. Konstantene definert under representerer
+        hva slags "celler" som finnes i kartet.
+      */
+      // verdier her som er oddetall representerer solide elementer som fører til kollisjoner med spillfiguren
+      // så her er bakke og plattform slike elementer.
+      const LUFT = 0;
+      const BAKKE = 1;
+      const BUSK = 2;
+      const PLATTFORM = 3;
+      const SKY = 4;
+      var kart = [
+        [0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0], // 13
+        [0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0], // 8              // 0 = luft
+        [0,0,4,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,4,0,0], // 7              // 1 = bakke
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], // 12
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], // 11
+        [0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], // 10
+        [0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,3,0,0,0,0], // 9
+        [0,0,0,0,0,0,0,0,3,3,0,0,3,0,3,0,3,0,0,0,0,0,3,0,0,0,0,0,3,0,0,0], // 6              // 2 = busk
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,3,0,0,3,0,0,3,3,0,0,0,3,0,3,0,0,0], // 5              // 3 = plattform
+        [0,0,0,0,0,3,0,3,0,0,0,3,3,3,3,0,0,0,0,3,3,3,3,0,0,3,3,3,0,0,3,0], // 4              // 4 = sky
+        [0,0,0,0,0,0,0,3,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], // 3
+        [0,0,2,0,0,3,0,3,2,0,2,0,0,0,0,2,0,0,0,0,0,0,2,2,0,0,0,2,0,0,2,0], // 2
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], // 1
+      ];
+
+
+      // p er prefikset til spillfiguren
+      const pW = 8; // I grafikken til spillfiguren så er den tegnet inni et rutenett på U*U piksler.
+                     // Men, alle pikslene i bredden er ikke nødvendigvis brukt for å visualisere figuren.
+                     // Så hvis figuren er tegnet smalere innenfor rutenettet, så bør også interaktiviteten
+                     // med spillbrettet reflektere dette. Det skal f.eks. være mulig for spillfiguren å gå
+                     // helt inntil en vegg før den stoppes av veggen. Denne konstanten definerer bredden
+                     // på rektangelet som inneholder "kollisjonskroppen" til figuren.
+
+      const pE = (U-pW)/2;
+
+      var pX = U;    // start-x-posisjon (i forhold til kartet)
+      var pY = 6*U;
+      var pAX = 0;    // Akselerasjon i x-retning
+      const pAY = 0.3;    // Akselerasjon i y-retning
+      var pVX = 0;    // Fart i x-retning
+      var pVY = 0;    // Fart i y-retning
+
+      var scrollX = 0;
+
+      const MOT_HØYRE=1;
+      const MOT_VENSTRE=2;
+      var hilario_orientering = MOT_HØYRE;
+
+
+      /* Om bevegelse av spillfiguren:
+         Spillet benytter seg av rekursive kall til requestAnimationFrame. I praksis betyr dette at gameLoop()
+         kjøres av nettleseren like mange ganger per sekund som den vertikale oppfriskningsraten til skjermen (vsync).
+         En ganske vanlig oppfriskningsrate er 60Hz (60 bilder per sekund), men kan være 75Hz, 50Hz, eller andre
+         rater. Konsekvensen er at spillet vil gå raskere jo høyere skjermraten er. Det er mulig å unngå denne
+         ulempen, med mer avansert kode.
+
+         Bevegelse av spillfiguren basert på en stegvis akselerasjon-fart-posisjon modell som oppdateres hver gang
+         gameLoop kjøres (hvert "frame" i animasjonen"). En forklaring på denne typen bevegelse med utgangspunkt i
+         når spillfiguren hopper rett opp fra bakken:
+
+         Når det trykkes på mellomromstasten (space) fra bakken, så settes pAV=-11 (fart), og pAY=0.3 (tyngdeakselerasjon).
+                                             Formel:               I første frame skjer dette:
+         I hvert frame endres farten slik:   pAV = pAV+pAY.        pAV = -11+0.3 = -10.7,
+                                              pY = pY+AV.          pY  = 384 + -10.7 = 373.3
+         I hvert frame fra hoppet har vi denne utviklingen på pAV: -10.7, -10.4, -10.1, -9.8,  -9.5,  -9.2, -8.3
+                                       og denne utviklingen på pY: 373.3, 362.9, 352.8,  343, 333.5, 324.3,  316
+         Så vi ser at i starten så har spillfiguren en fart på -10.7 piksler hvert frame oppover. Denne farten blir endret
+         med +0.3 hvert frame. Det betyr at spillfigurens høyde over bakken øker raskest i starten, men etter hvert så vil
+         pAV > 0, og da vil spillfiguren begynne å falle nedover igjen. Når spillfiguren har falt ned på bakken igjen, settes
+         pAV=0, pAY=0, og pY=bakkenivå+spillfigurhøyde, slik at fallet stoppes.
+      */
+
+      var hopper = false;  // Denne boolske variabelen holder rede på om spillfiguren i øyeblikket er i et hopp.
+
+      const pVX_MAX = 2.5;  // Spillfigurens maksimale fart i x-retning
+
+      // Følgende 3 konstanter er såkalte tilstander. Variabelen tilstand_hilario har til enhver tid verdien til en av disse,
+      // og holder på den måten rede på om spillfiguren til en hver tid går mot venstre, mot høyre, eller står stille.
+      const IMPULS_VENSTRE=0;
+      const IMPULS_HØYRE=1;
+      const IMPULS_OPP=6;
+      const IMPULS_NED=7;
+      const IMPULS_INGEN=2;
+      var tilstand_hilario=IMPULS_INGEN;
+
+      var keys = [];
+      window.onkeyup = function(e) {keys[e.keyCode]=false;}
+      window.onkeydown = function(e) {keys[e.keyCode]=true;}
+
+
+      function yxUtenforKart(y,x) {
+        if (y<0) return true;
+        else if (x<0) return true;
+        else if (y >= kart.length) return true;
+        else if (x >= kart[y].length) return true;
+        else return false;
+      }
+
+      function solidKvadrant(k,y,x) {
+        switch(k) {
+          case 1:
+            if (yxUtenforKart(y,x+1)) return false;
+            else if (kart[y][x+1]%2==1) return true;
+            else return false;
+          break;
+          case 2:
+            if (yxUtenforKart(y+1,x+1)) return false;
+            else if (kart[y+1][x+1]%2==1) return true;
+            else return false;
+          break;
+          case 3:
+            if (yxUtenforKart(y+1,x)) return false;
+            else if (kart[y+1][x]%2==1) return true;
+            else return false;
+          break;
+          case 4:
+            if (yxUtenforKart(y,x)) return false;
+            else if (kart[y][x]%2==1) return true;
+            else return false;
+          break;
+        }
+      }
+
+      function hilario_bevegelse() {
+        // Sjekker først tilstanden til tastene
+        if (keys[32]) hopp();
+        if (keys[37] && !keys[39]) {   // Hvis venstre piltast holdes inne og ikke høyre piltast holdes inne,
+          tilstand_hilario=IMPULS_VENSTRE;   // så settes tilstanden til IMPULS_VENSTRE
+        } else if (!keys[37] && keys[39]) {  // ellers, hvis venstre piltast ikke holdes inne og høyre piltast holdes inne,
+          tilstand_hilario=IMPULS_HØYRE;     // så settes tilstanden til IMPULS_HØYRE
+        } else if ((keys[37] && keys[39]) || (!keys[37] && !keys[39])) {  // ellers, hvis både venstre og høyre piltast holdes inne,
+                                                                          // eller hvis ingen av dem holdes inne, så settes tilstanden
+                                                                          // til IMPULS_INGEN.
+          tilstand_hilario=IMPULS_INGEN;
+        }
+
+
+        switch(tilstand_hilario) {
+          case IMPULS_VENSTRE:
+            if (pVX > -pVX_MAX) {  // Hvis farten mot venstre ikke er maksimal fart mot venstre
+              pAX = -0.2;             // Da setter akselerasjon mot venstre
+              pVX += pAX;             // Endrer farten
+              if (pVX < -pVX_MAX) pVX = -pVX_MAX;   // Hvis farten mot venstre nå er større enn
+                                                    // maksimal fart mot venstre, så settes farten
+                                                    // til maksimal fart mot venstre.
+            }
+          break;
+          case IMPULS_HØYRE:
+            if (pVX < pVX_MAX) {   // Hvis farten mot høyre ikke er maksimal fart mot høyre
+              pAX = 0.2;              // Da setter akselerasjon mot høyre
+              pVX += pAX;             // Endrer farten
+              if (pVX > pVX_MAX) pVX = pVX_MAX;     // Hvis farten mot høyre nå er større enn
+                                                    // maksimal fart mot høyre, så settes farten
+                                                    // til maksimal fart mot høyre.
+            }
+          break;
+          case IMPULS_INGEN:
+            pAX = -0.1*pVX;  // Akselerasjonen settes til 20% av, og motsatt retning av farten.
+                             // Det fører til oppbremsing, uansett om bevegelsen i høyeblikket er mot høyre eller venstre
+            pVX += pAX;      // Endrer farten
+          break;
+        }
+        if (pVX < 0) hilario_orientering = MOT_VENSTRE;
+        if (pVX > 0) hilario_orientering = MOT_HØYRE;
+
+        pVY += (pAY-0.019*pVY); // Endre på y-hastighet pga tyngdekraft og luftmotstand
+                                // Luftmotstanden er justert slik at hilario garantert faller med mindre enn 8 piksler hvert frame
+                                // slik at det blir lettere å håndtere kollisjoner med solide objekter.
+
+
+
+        pX += pVX;  // Endre x-posisjon
+        pY += pVY;  // Endre y-posisjon
+
+
+
+
+        // Kollisjonshåndtering:
+
+        // x og y er posisjonen i kart som er nærmest sentrum av spillfiguren
+        x=Math.floor((pX+U/2)/U);
+        y=Math.floor((pY+U/2)/U);
+
+        if (pY==y*U) {
+          hilario_is_on_row = true;
+        } else {
+          hilario_is_on_row = false;
+        }
+
+        if (pX+pE >= x*U  &&  pX-pE <= x*U) {
+          hilario_is_on_column = true;
+        } else {
+          hilario_is_on_column = false;
+        }
+
+        if (hilario_is_on_row && hilario_is_on_column) {
+          // Her er det ingen kollisjoner å tenke på
+        }
+        else if (hilario_is_on_row) {
+          // Her er det kun kollisjon mot siden
+          x=Math.floor(pX/U);
+          if (pX+U/2 <= (x+1)*U) {
+            // #01 Hvis kart[y][x+1] er solid, er det kollisjon mot høyre, og hilario må flyttes slik: pX=(x+1)*U-pE
+            if (solidKvadrant(1,y,x)) { pX=(x+1)*U+pE-U; pVX=0; }
+          }
+          else {
+            // #02 Hvis kart[y][x] er solid er det kollisjon mot venstre, og hilario må flyttes slik: pX=(x+1)*U+pE-U
+            if (solidKvadrant(4,y,x)) { pX=(x+1)*U-pE; pVX=0; }
+          }
+        }
+        else if (hilario_is_on_column) {
+          // Her er det kun kollisjon vertikalt
+          y=Math.floor(pY/U);
+          if (pY+U/2 <= (y+1)*U) {
+            // #03 Hvis kart[y+1][x] er solid, er det kollisjon nedover, og hilario må flyttes slik: pY=y*U
+            if (solidKvadrant(3,y,x)) { pY=y*U; pVY=0; hopper=false; }
+          } else {
+            // #04 hvis kart[y][x] er solid, er det kollisjon oppover, bytter vi fortegn på
+            // vertikal fart:  pVY = -pVY. På denne måten vil hilario sprette ned igjen ved hopp mot tak
+            if (solidKvadrant(4,y,x)) { pY = (y+1)*U; pVY = -pVY; }
+          }
+        }
+        else {
+          x=Math.floor(pX/U);
+          y=Math.floor(pY/U);
+          // hvis midtpunktet på spillfiguren er i 1. kvadrant:
+          if (erIKvadrant(4,y,x)) { // midtpunktet på spillfiguren er i 4. kvadrant:
+            if (solidKvadrant(3,y,x)) { pY=y*U; pVY=0; hopper=false; }          // #05 #08
+            if (solidKvadrant(1,y,x)) { pX=(x+1)*U-U+pE; pVX=0; } // #07 #09   (denne og forrige til sammen løser #10 og #11
+            if (!solidKvadrant(4,y,x) && !solidKvadrant(1,y,x) && solidKvadrant(2,y,x)) {  // #06
+              if (solidKvadrant(1,y-1,x) && pVY < 0 && tilstand_hilario==IMPULS_HØYRE && pY-y*U < U/4) { // Hjelper hilario inn smale åpninger
+                pY=y*U;
+                pVY=0;
+                hopper=false;
+                pX=(x+1)*U+2-U+pE;
+              } else {
+                if (pY+U-(y+1)*U > (pX+U-pE-(x+1)*U)) { // treffer mer enn to ganger mer på siden, flyttes mot venstre
+                  pX=(x+1)*U-U+pE;
+                  //pVX=0;
+                } else { // treffer minst halvparten så mye på kanten som på siden, flyttes opp. vi favoriserer altså å lande oppå en kant.
+                  pY=y*U;
+                  pVY=0;
+                  hopper=false;
+                }
+              }
+            }
+          } else if (erIKvadrant(1,y,x)) {  // hvis midtpunktet på spillfiguren er i 1. kvadrant:
+            if (solidKvadrant(2,y,x)) { pY=y*U; pVY=0; hopper=false;}    // #12 #15
+            if (solidKvadrant(4,y,x)) { pX=(x+1)*U-pE; pVX=0; } // #14 #16   (denne og forrige til sammen løser #17 og #18
+            if (!solidKvadrant(4,y,x) && !solidKvadrant(2,y,x) && solidKvadrant(3,y,x)) {  // #13
+              if (solidKvadrant(4,y-1,x) && pVY < 0 && tilstand_hilario==IMPULS_VENSTRE && pY-y*U < U/4) { // Hjelper hilario inn smale åpninger
+                pY=y*U;
+                pVY=0;
+                hopper=false;
+                pX=(x+1)*U-2-pE;
+              } else {
+                if (pY+U-(y+1)*U > ((x+1)*U-pX-pE)) { // treffer mer enn to ganger mer på siden, flyttes mot høyre
+                  pX=(x+1)*U-pE;
+                  //pVX=0;
+                } else { // treffer minst halvparten så mye på kanten som på siden, flyttes opp. vi favoriserer altså å lande oppå en kant.
+                  pY=y*U;
+                  pVY=0;
+                  hopper=false;
+                }
+              }
+            }
+          } else if (erIKvadrant(2,y,x)) { // hvis midtpunktet på spillfiguren er i 3. kvadrant:
+            if (solidKvadrant(1,y,x)) { pY = (y+1)*U; pVY = -pVY; } // #19 #22
+            if (solidKvadrant(3,y,x)) { pX=(x+1)*U-pE; pVX=0; } // #21 #23   (denne og forrige til sammen løser #24 og #25
+            if (!solidKvadrant(1,y,x) && !solidKvadrant(3,y,x) && solidKvadrant(4,y,x)) {  // #20
+              if (solidKvadrant(4,y+2,x) && pVY > 0 && tilstand_hilario==IMPULS_VENSTRE && pY-(y+1)*U < U/4) { // Hjelper hilario inn smale åpninger
+                pY=(y+1)*U;
+                pVY=0;
+                hopper=false;
+                pX=(x+1)*U-2-pE;
+              } else {
+                if ((y+1)*U-pY > ((x+1)*U-pX-pE)) { // treffer mer enn to ganger mer på siden, flyttes mot høyre
+                  pX=(x+1)*U-pE;
+                  //pVX=0;
+                } else { // treffer minst halvparten så mye på kanten som på siden, flyttes opp. vi favoriserer altså å lande oppå en kant.
+                  pY = (y+1)*U;
+                  pVY = -pVY;
+                }
+              }
+            }
+          } else if (erIKvadrant(3,y,x)) {
+            if (solidKvadrant(4,y,x)) { pY = (y+1)*U; pVY = -pVY; } // #26 #29
+            if (solidKvadrant(2,y,x)) { pX=(x+1)*U-U+pE; pVX=0; } // #28 #30   (denne og forrige til sammen løser #31 og #32
+            if (!solidKvadrant(4,y,x) && !solidKvadrant(2,y,x) && solidKvadrant(1,y,x)) {  // #27
+              if (solidKvadrant(1,y+2,x) && pVY > 0 && tilstand_hilario==IMPULS_HØYRE && pY-(y+1)*U < U/4) { // Hjelper hilario inn smale åpninger
+                pY=(y+1)*U;
+                pVY=0;
+                hopper=false;
+                pX=(x+1)*U+2-U+pE;
+              } else {
+                if ((y+1)*U-pY > (pX+U-pE-(x+1)*U)) { // treffer mer enn to ganger mer på siden, flyttes mot venstre
+                  pX=(x+1)*U-U+pE;
+                  //pVX=0;
+                } else { // treffer minst halvparten så mye på kanten som på siden, flyttes opp. vi favoriserer altså å lande oppå en kant.
+                  pY = (y+1)*U;
+                  pVY = -pVY;
+                }
+              }
+            }
+          }
+        }
+
+        // Hindrer Hilario i å gå ut av brettet til venstre
+        if (pX <= -pE) {
+          pX=-pE;
+          pVX=0;
+        }
+        // Hindrer Hilario i å gå ut av brettet mot høyre
+        if (pX > (kart[0].length-1)*U+pE) {
+          pX=(kart[0].length-1)*U+pE;
+          pVX=0;
+        }
+      }
+
+      function hopp() {
+      /*
+        // Må håndtere en type kollisjon a priori her
+        // x og y er posisjonen i kart som er nærmest sentrum av spillfiguren
+        x=Math.floor((pX+U/2)/U);
+        y=Math.floor((pY+U/2)/U);
+
+        if (pY==y*U) {
+          hilario_is_on_row = true;
+        } else {
+          hilario_is_on_row = false;
+        }
+
+        if (pX+pE >= x*U  &&  pX-pE <= x*U) {
+          hilario_is_on_column = true;
+        } else {
+          hilario_is_on_column = false;
+        }
+
+        ¤¤¤ A PRIORI HINDRING AV HOPP HVIS DET FØRER TIL KOLLISJON OPPOVER (??) VI KAN GODT "HOPPE" FOR Å HITTE KNUSBARE MEN IKKE FLYTTE.
+        if (hilario_is_on_row && hilario_is_on_column) {
+          if(solidKvadrant(4,y,x))
+        }
+
+      */
+        if (!hopper) {
+          lyder[0].play();  // Spill hoppelyd
+          pVY = -7;
+          hopper = true;
+        }
+      }
+
+
+
+      //                  y  x
+      // console.log(kart[1][2]); // 9
+
+      const HILARIO = 5;
+
+      var bildeFiler = ["luft2.png","bakke.png","busk.png","plattform2.png","sky.png","hilario2.png"];
+      var bilder = [];
+      var antall_bilder_lastet = 0;
+
+      for (var i=0; i<bildeFiler.length; i+=1) {
+        var bilde = new Image();
+        bilde.onload = function() {
+          antall_bilder_lastet += 1;
+          if (antall_bilder_lastet+antall_lyder_lastet == bildeFiler.length + lydFiler.length) {
+            startGame();
+          }
+        };
+        bilde.src = bildeFiler[i];
+        bilder.push(bilde);
+      }
+
+      var lydFiler = ["jump.mp3","Great_Giana_Sisters_T03.sid_MOS6581R2.mp3"];
+      var lyder = [];
+      var antall_lyder_lastet = 0;
+      for (var i=0; i<lydFiler.length; i+=1) {
+        var lyd = new Audio();
+        lyd.oncanplaythrough = function() {
+          antall_lyder_lastet += 1;
+          if (antall_bilder_lastet+antall_lyder_lastet == bildeFiler.length + lydFiler.length) {
+            startGame();
+          }
+        };
+        lyd.src = lydFiler[i];
+        lyder.push(lyd);
+      }
+
+      // http://sfbgames.com/chiptone/?s=eNpjYBK1DX7PwCz_XzGPAQjqG0AkQyOjN_fV-v_2_xmMjSCCPmdQ6cgZ2MXV0qCGsK8Dap0IZLgUf78GEjEtU30FlnF0558CYjh_e2kHEfjMyg9i2Lz9oghxAC83iPb8zhEMoo2EOG3AdrrIh4Lo-v8gKP8_cgYTAP-tNrI.
+      // http://se2a1.bigbox.info/soasc/index.php?av=0&sb=SOASC&ss=giana&sf=&sy=&sc=&srd=&sd=&sr=&sx=&sl=
+      //var hoppelyd = Audio();
+      //hoppelyd.onload = function
+
+      function startGame() {
+        lyder[1].loop = true;
+        lyder[1].play();
+        gameLoop();
+      }
+
+      var himmel_gradient=ctx.createLinearGradient(W/2,0,W/2,H);
+      himmel_gradient.addColorStop(0,"#8888FF");
+      himmel_gradient.addColorStop(1,"#BBBBFF");
+
+      var kart_x_offset;
+
+      var hilario_is_on_row;
+      var hilario_is_on_column;
+
+
+
+      function erIKvadrant(k,y,x) {
+        if      (k==1) return (pX+U/2 >  (x+1)*U  &&  pY+U/2 <= (y+1)*U);
+        else if (k==2) return (pX+U/2 >  (x+1)*U  &&  pY+U/2 >  (y+1)*U);
+        else if (k==3) return (pX+U/2 <= (x+1)*U  &&  pY+U/2 >  (y+1)*U);
+        else if (k==4) return (pX+U/2 <= (x+1)*U  &&  pY+U/2 <= (y+1)*U);
+      }
+
+
+    function gameLoop() {
+          var x, y;
+
+
+        hilario_bevegelse();
+
+        ctx.fillStyle=himmel_gradient;
+        ctx.fillRect(0,0,W,H);
+        if (pX <= (W-U)/2) {
+          scrollX = 0;
+        } else if (pX>(W-U)/2 && pX<(kart[0].length-1)*U-(W-U)/2) {
+          scrollX = pX-(W-U)/2;
+        } else {
+          scrollX = (kart[0].length)*U-W;
+        }
+
+        kart_x_offset = Math.floor(scrollX/U);
+        for(x=kart_x_offset; x<=kart_x_offset+X; x++) {
+          for(y=0; y<kart.length; y++) {
+            switch(kart[y][x]) {
+              case BAKKE:     ctx.drawImage(bilder[BAKKE],              x*U-scrollX,y*U,U,U); break;
+              case BUSK:      ctx.drawImage(bilder[BUSK],               x*U-scrollX,y*U,U,U); break;
+              case PLATTFORM: ctx.drawImage(bilder[PLATTFORM],0,0,U,U,x*U-scrollX,y*U,U,U); break;
+              case SKY:       ctx.drawImage(bilder[SKY],                x*U-scrollX,y*U,U,U); break;
+            }
+          }
+        }
+
+
+        //visKvadanter();
+
+
+        if (hopper) {
+          if (hilario_orientering == MOT_HØYRE) ctx.drawImage(bilder[HILARIO],2*U,0,U,U,pX-scrollX,pY,U,U);
+          else ctx.drawImage(bilder[HILARIO],5*U,0,U,U,pX-scrollX,pY,U,U);
+        } else {
+          if (hilario_orientering == MOT_HØYRE) ctx.drawImage(bilder[HILARIO],U*(Math.floor((pX+25)/U)%2),0,U,U,pX-scrollX,pY,U,U);
+          else ctx.drawImage(bilder[HILARIO],3*U+U*(Math.floor((pX+25)/U)%2),0,U,U,pX-scrollX,pY,U,U);
+        }
+
+
+
+        requestAnimationFrame(gameLoop);
+      }
+
+
+      // Denne funksjonen er ikke i bruk til vanlig i spillet, men var ekstremt nyttig i utviklingen
+      // av kollisjonshåndteringen i funksjonen hilario_bevegelse.
+      function visKvadanter() {
+
+        // x og y er posisjonen i kart som er nærmest sentrum av spillfiguren
+        x=Math.floor((pX+U/2)/U);
+        y=Math.floor((pY+U/2)/U);
+
+        if (pY==y*U) {
+          hilario_is_on_row = true;
+        } else {
+          hilario_is_on_row = false;
+        }
+
+        if (pX+pE >= x*U  &&  pX-pE <= x*U) {
+          hilario_is_on_column = true;
+        } else {
+          hilario_is_on_column = false;
+        }
+
+        if (hilario_is_on_row && hilario_is_on_column) {
+          ctx.fillStyle = "rgba(0,255,0,0.5)";
+          ctx.fillRect(x*U-scrollX,y*U,U,U);
+        }
+        else if (hilario_is_on_row) {
+          x=Math.floor(pX/U);
+          ctx.fillStyle = "rgba(255,255,0,0.5)";
+          ctx.fillRect(x*U-scrollX,y*U,U,U);
+          ctx.fillRect((x+1)*U-scrollX,y*U,U,U);
+          ctx.fillStyle = 'rgba(0,0,0,1)';
+          if (pX+U/2 <= (x+1)*U) {
+            ctx.fillRect((x+1)*U-scrollX,pY,pX+U-pE-(x+1)*U,U);
+          }
+          else {
+            ctx.fillRect(pX+pE-scrollX,pY,(x+1)*U-(pX+pE),U);
+          }
+
+        }
+        else if (hilario_is_on_column) {
+          y=Math.floor(pY/U);
+          ctx.fillStyle = "rgba(255,111,0,0.5)";
+          ctx.fillRect(x*U-scrollX,y*U,U,U);
+          ctx.fillRect(x*U-scrollX,(y+1)*U,U,U);
+          ctx.fillStyle = 'rgba(0,0,0,1)';
+          if (pY+U/2 <= (y+1)*U) {
+            ctx.fillRect(pX+pE-scrollX,(y+1)*U,pW,pY+U-(y+1)*U);
+          } else {
+            ctx.fillRect(pX+pE-scrollX,pY,pW,(y+1)*U-pY);
+          }
+        }
+        else {
+          x=Math.floor(pX/U);
+          y=Math.floor(pY/U);
+          ctx.fillStyle = "rgba(255,0,0,0.5)";
+          ctx.fillRect(x*U-scrollX,y*U,U,U);
+          ctx.fillRect((x+1)*U-scrollX,y*U,U,U);
+          ctx.fillRect(x*U-scrollX,(y+1)*U,U,U);
+          ctx.fillRect((x+1)*U-scrollX,(y+1)*U,U,U);
+          ctx.fillStyle = 'rgba(0,0,0,1)';
+          // hvis midtpunktet på spillfiguren er i 1. kvadrant:
+          if (erIKvadrant(1,y,x)) {
+            ctx.fillRect(pX+pE-scrollX,pY,(x+1)*U-(pX+pE),(y+1)*U-pY); // NW
+            ctx.fillRect((x+1)*U-scrollX,(y+1)*U,pX+U-pE-(x+1)*U,pY+U-(y+1)*U); // SE
+            ctx.fillRect(pX+pE-scrollX,(y+1)*U,(x+1)*U-(pX+pE),pY+U-(y+1)*U); // SW
+          } else if (erIKvadrant(2,y,x)) {  // hvis midtpunktet på spillfiguren er i 2. kvadrant:
+            ctx.fillRect(pX+pE-scrollX,pY,(x+1)*U-(pX+pE),(y+1)*U-pY); // NW
+            ctx.fillRect((x+1)*U-scrollX,pY,pX+U-pE-(x+1)*U,(y+1)*U-pY);  // NE
+            ctx.fillRect(pX+pE-scrollX,(y+1)*U,(x+1)*U-(pX+pE),pY+U-(y+1)*U); // SW
+          } else if (erIKvadrant(3,y,x)) { // hvis midtpunktet på spillfiguren er i 3. kvadrant:
+            ctx.fillRect(pX+pE-scrollX,pY,(x+1)*U-(pX+pE),(y+1)*U-pY); // NW
+            ctx.fillRect((x+1)*U-scrollX,pY,pX+U-pE-(x+1)*U,(y+1)*U-pY);  // NE
+            ctx.fillRect((x+1)*U-scrollX,(y+1)*U,pX+U-pE-(x+1)*U,pY+U-(y+1)*U); // SE
+          } else if (erIKvadrant(4,y,x)) { // midtpunktet på spillfiguren er i 4. kvadrant:
+            ctx.fillRect((x+1)*U-scrollX,pY,pX+U-pE-(x+1)*U,(y+1)*U-pY);  // NE
+            ctx.fillRect((x+1)*U-scrollX,(y+1)*U,pX+U-pE-(x+1)*U,pY+U-(y+1)*U); // SE
+            ctx.fillRect(pX+pE-scrollX,(y+1)*U,(x+1)*U-(pX+pE),pY+U-(y+1)*U); // SW
+          }
+
+        }
+
+        ctx.fillStyle = 'rgba(0,255,0,.5)';
+        ctx.fillRect(pX+pE-scrollX,pY,pW,U);
+
+      }
+
+    </script>
+  
+
+</body></html>
